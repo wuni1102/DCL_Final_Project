@@ -4,9 +4,9 @@ module main(
     input clk, // 100MHz
     input reset_n, // active low
     input [3:0] usr_btn,
-    
+
     output [3:0] usr_led,
-    
+
     // VGA signal
     output VGA_HSYNC, VGA_VSYNC,
     output [3:0] VGA_RED, VGA_GREEN, VGA_BLUE
@@ -28,8 +28,8 @@ reg [11:0] rgb_reg;
 reg [11:0] rgb_next;
 assign {VGA_RED, VGA_GREEN, VGA_BLUE} = rgb_reg;
 vga_sync vga(.clk(vga_clk), .reset(~reset_n), .visible(vedio_on),
-             .p_tick(pixel_tick), .pixel_x(pixel_x), .pixel_y(pixel_y),
-             .oHS(VGA_HSYNC), .oVS(VGA_VSYNC));
+            .p_tick(pixel_tick), .pixel_x(pixel_x), .pixel_y(pixel_y),
+            .oHS(VGA_HSYNC), .oVS(VGA_VSYNC));
 
 // end of vga
 //==================================================================
@@ -43,7 +43,7 @@ assign btn_soft_drop = usr_btn[2];
 assign btn_rot = usr_btn[3];
 
 assign usr_led = ~usr_btn;
-    
+
 // end of keyboard binding
 //==================================================================
 //==================================================================
@@ -58,7 +58,7 @@ parameter ROTATION_0 = 0, ROTATION_1 = 1,
 
 parameter Handling_DAS = 10, Handling_ARR = 2,
           Handling_ARE = 6;
-    
+
 // end of parameters
 //==================================================================
 //==================================================================
@@ -75,7 +75,7 @@ always @(negedge clk) begin
         clk_frame_pulse <= 1'b0;
     end
 end
-  
+
 // end of frame clock
 //==================================================================
 //==================================================================
@@ -142,7 +142,7 @@ always @(negedge clk) begin
         board[block_x][block_y] <= block_data;
     end
 end
-    
+
 // end of board memory manager
 //==================================================================
 //==================================================================
@@ -175,9 +175,9 @@ wire [3:0] test_x_off_2;
 wire [5:0] test_y_off_2;
 
 Tetromino tetromino_test(test_piece, test_x, test_y, test_rotation,
-                         test_x_off_0, test_y_off_0,
-                         test_x_off_1, test_y_off_1,
-                         test_x_off_2, test_y_off_2);
+                        test_x_off_0, test_y_off_0,
+                        test_x_off_1, test_y_off_1,
+                        test_x_off_2, test_y_off_2);
 // 回傳四個方塊的x,y
 
 // took 5 clk to operate // better to use FSM like game state, 現在可能有latch
@@ -260,8 +260,8 @@ always @(negedge clk) begin
         end
     endcase
 end
-    
-// end of collsion test 
+
+// end of collsion test
 //==================================================================
 //==================================================================
 // top out detecter
@@ -302,7 +302,7 @@ end
 //==================================================================
 //==================================================================
 // game update
-    
+
 parameter ACTION_NONE = 0;
 parameter ACTION_MOVE_L = 1;
 parameter ACTION_MOVE_R = 2;
@@ -835,174 +835,270 @@ always @(posedge clk) begin
         endcase
     end
 end
-    
-// end of game updater 
+
+// end of game updater
 //==================================================================
 //==================================================================
 // rgb controller for vga
+// [UI_MOD_START] 2023/12/06 Modified for New UI Layout
 
+    // --------------------------------------------------------
+    // [UI_PARAM] 1. 介面區域尺寸與位置定義
+    // --------------------------------------------------------
     parameter CENTER_W = WIDTH / 2;
     parameter CENTER_H = HEIGHT / 2;
     parameter BLOCK_SIZE = 16;
-    parameter LINE_WIDTH = 5;
-    parameter LEFT_BOUND = CENTER_W - BLOCK_SIZE * 5;
-    parameter RIGHT_BOUND = CENTER_W + BLOCK_SIZE * 5;
-    parameter TOP_BOUND = CENTER_H - BLOCK_SIZE * 10;
-    parameter BOTTOM_BOUND = CENTER_H + BLOCK_SIZE * 10;
+    parameter LINE_WIDTH = 4; // 邊框線條寬度
 
+    // 定義主遊戲區 (Playfield) - 完整 10x20 格
+    // 為了配合原有的 index 計算邏輯，LEFT_BOUND 必須保持與原本邏輯一致
+    // 原本 logic: (pixel_x - LEFT_BOUND) / 16
+    parameter LEFT_BOUND  = CENTER_W - BLOCK_SIZE * 5;  // 320 - 80 = 240
+    parameter RIGHT_BOUND = CENTER_W + BLOCK_SIZE * 5;  // 320 + 80 = 400
+    parameter TOP_BOUND   = CENTER_H - BLOCK_SIZE * 10; // 240 - 160 = 80
+    parameter BOTTOM_BOUND= CENTER_H + BLOCK_SIZE * 10; // 240 + 160 = 400
+
+    // 定義 Hold 區域 (左側)
+    parameter HOLD_W_START = LEFT_BOUND - BLOCK_SIZE * 5 - 10; // 左移並留空隙
+    parameter HOLD_W_END   = LEFT_BOUND - 10;
+    parameter HOLD_H_START = TOP_BOUND;
+    parameter HOLD_H_END   = TOP_BOUND + BLOCK_SIZE * 5; // 高度約 5 格
+
+    // 定義 Next 區域 (右側)
+    parameter NEXT_W_START = RIGHT_BOUND + 10;
+    parameter NEXT_W_END   = RIGHT_BOUND + BLOCK_SIZE * 5 + 10;
+    parameter NEXT_H_START = TOP_BOUND;
+    parameter NEXT_H_END   = TOP_BOUND + BLOCK_SIZE * 12; // 顯示多個 Next，拉長
+
+    // 定義 Score 區域 (右下，位於 Next 下方)
+    parameter SCORE_W_START = NEXT_W_START;
+    parameter SCORE_W_END   = NEXT_W_END;
+    parameter SCORE_H_START = NEXT_H_END + 20; // 留點空隙
+    parameter SCORE_H_END   = BOTTOM_BOUND;
+
+    // --------------------------------------------------------
+    // [UI_LOGIC] 2. 輔助訊號計算
+    // --------------------------------------------------------
+
+    // 原有的 Index 計算 (保持不變以維持遊戲運作)
     wire [4:0] index_W;
     wire [3:0] index_neg_W;
     wire index_sign_W;
     wire [5:0] index_H;
     wire [3:0] index_item;
+
     assign index_W = (pixel_x - LEFT_BOUND) / BLOCK_SIZE;
     assign index_neg_W = 15 - (LEFT_BOUND - pixel_x) / BLOCK_SIZE;
-    assign index_sign_W = LEFT_BOUND > pixel_x; // 1 == negative
+    assign index_sign_W = LEFT_BOUND > pixel_x;
     assign index_H = (BOTTOM_BOUND - pixel_y) / BLOCK_SIZE;
     assign index_item = board[index_W][index_H];
 
-    Tetromino tetromino1(piece, piece_x, piece_y, rotation
-                        , piece_x_off[0], piece_y_off[0]
-                        , piece_x_off[1], piece_y_off[1]
-                        , piece_x_off[2], piece_y_off[2]);
+    // Tetromino 實例化 (保持不變)
+    Tetromino tetromino1(piece, piece_x, piece_y, rotation, piece_x_off[0], piece_y_off[0], piece_x_off[1], piece_y_off[1], piece_x_off[2], piece_y_off[2]);
+
     wire index_is_piece;
     assign index_is_piece = ((index_W == piece_x && index_H == piece_y)
-                          || (index_W == piece_x_off[0] && index_H == piece_y_off[0])
-                          || (index_W == piece_x_off[1] && index_H == piece_y_off[1])
-                          || (index_W == piece_x_off[2] && index_H == piece_y_off[2]))
-                          && (P_piece == S_PIECE_DROP);
-                         
+                            || (index_W == piece_x_off[0] && index_H == piece_y_off[0])
+                            || (index_W == piece_x_off[1] && index_H == piece_y_off[1])
+                            || (index_W == piece_x_off[2] && index_H == piece_y_off[2]))
+                            && (P_piece == S_PIECE_DROP);
+
+    // Hold / Queue 實例化 (保持不變)
     wire [3:0] hold_piece_x_off[0:2];
     wire [5:0] hold_piece_y_off[0:2];
-    Tetromino tetromino_hold(hold_piece, 12, 17, ROTATION_0
-                            , hold_piece_x_off[0], hold_piece_y_off[0]
-                            , hold_piece_x_off[1], hold_piece_y_off[1]
-                            , hold_piece_x_off[2], hold_piece_y_off[2]);
+    Tetromino tetromino_hold(hold_piece, 12, 17, ROTATION_0, hold_piece_x_off[0], hold_piece_y_off[0], hold_piece_x_off[1], hold_piece_y_off[1], hold_piece_x_off[2], hold_piece_y_off[2]);
     wire hold_piece_render;
-    assign hold_piece_render = ((index_neg_W == 12 && index_H == 17)
-                             || (index_neg_W == hold_piece_x_off[0] && index_H == hold_piece_y_off[0])
-                             || (index_neg_W == hold_piece_x_off[1] && index_H == hold_piece_y_off[1])
-                             || (index_neg_W == hold_piece_x_off[2] && index_H == hold_piece_y_off[2]))
-                             && hold_piece != BOARD_EMPTY && index_sign_W;
+    // 注意: hold piece 原始邏輯是用 index_neg_W 定位，這會自動對應到畫面左側
+    assign hold_piece_render = ((index_neg_W == 12 && index_H == 17) ||
+                            (index_neg_W == hold_piece_x_off[0] && index_H == hold_piece_y_off[0]) ||
+                            (index_neg_W == hold_piece_x_off[1] && index_H == hold_piece_y_off[1]) ||
+                            (index_neg_W == hold_piece_x_off[2] && index_H == hold_piece_y_off[2])) &&
+                            hold_piece != BOARD_EMPTY && index_sign_W;
 
-    wire [3:0] queue_piece_x_off[0:4][0:2];
-    wire [5:0] queue_piece_y_off[0:4][0:2];
-    wire queue_piece_render[0:4];
-    Tetromino tetromino_queue0(queue[0], 12, 17, ROTATION_0
-                             , queue_piece_x_off[0][0], queue_piece_y_off[0][0]
-                             , queue_piece_x_off[0][1], queue_piece_y_off[0][1]
-                             , queue_piece_x_off[0][2], queue_piece_y_off[0][2]);
-    Tetromino tetromino_queue1(queue[1], 12, 14, ROTATION_0
-                             , queue_piece_x_off[1][0], queue_piece_y_off[1][0]
-                             , queue_piece_x_off[1][1], queue_piece_y_off[1][1]
-                             , queue_piece_x_off[1][2], queue_piece_y_off[1][2]);
-    Tetromino tetromino_queue2(queue[2], 12, 11, ROTATION_0
-                             , queue_piece_x_off[2][0], queue_piece_y_off[2][0]
-                             , queue_piece_x_off[2][1], queue_piece_y_off[2][1]
-                             , queue_piece_x_off[2][2], queue_piece_y_off[2][2]);
-    Tetromino tetromino_queue3(queue[3], 12, 8, ROTATION_0
-                             , queue_piece_x_off[3][0], queue_piece_y_off[3][0]
-                             , queue_piece_x_off[3][1], queue_piece_y_off[3][1]
-                             , queue_piece_x_off[3][2], queue_piece_y_off[3][2]);
-    Tetromino tetromino_queue4(queue[4], 12, 5, ROTATION_0
-                             , queue_piece_x_off[4][0], queue_piece_y_off[4][0]
-                             , queue_piece_x_off[4][1], queue_piece_y_off[4][1]
-                             , queue_piece_x_off[4][2], queue_piece_y_off[4][2]);
-    assign queue_piece_render[0] = ((index_W == 12 && index_H == 17)
-                                 || (index_W == queue_piece_x_off[0][0] && index_H == queue_piece_y_off[0][0])
-                                 || (index_W == queue_piece_x_off[0][1] && index_H == queue_piece_y_off[0][1])
-                                 || (index_W == queue_piece_x_off[0][2] && index_H == queue_piece_y_off[0][2]))
-                                 && !index_sign_W;
-    assign queue_piece_render[1] = ((index_W == 12 && index_H == 14)
-                                 || (index_W == queue_piece_x_off[1][0] && index_H == queue_piece_y_off[1][0])
-                                 || (index_W == queue_piece_x_off[1][1] && index_H == queue_piece_y_off[1][1])
-                                 || (index_W == queue_piece_x_off[1][2] && index_H == queue_piece_y_off[1][2]))
-                                 && !index_sign_W;
-    assign queue_piece_render[2] = ((index_W == 12 && index_H == 11)
-                                 || (index_W == queue_piece_x_off[2][0] && index_H == queue_piece_y_off[2][0])
-                                 || (index_W == queue_piece_x_off[2][1] && index_H == queue_piece_y_off[2][1])
-                                 || (index_W == queue_piece_x_off[2][2] && index_H == queue_piece_y_off[2][2]))
-                                 && !index_sign_W;
-    assign queue_piece_render[3] = ((index_W == 12 && index_H == 8)
-                                 || (index_W == queue_piece_x_off[3][0] && index_H == queue_piece_y_off[3][0])
-                                 || (index_W == queue_piece_x_off[3][1] && index_H == queue_piece_y_off[3][1])
-                                 || (index_W == queue_piece_x_off[3][2] && index_H == queue_piece_y_off[3][2]))
-                                 && !index_sign_W;
-    assign queue_piece_render[4] = ((index_W == 12 && index_H == 5)
-                                 || (index_W == queue_piece_x_off[4][0] && index_H == queue_piece_y_off[4][0])
-                                 || (index_W == queue_piece_x_off[4][1] && index_H == queue_piece_y_off[4][1])
-                                 || (index_W == queue_piece_x_off[4][2] && index_H == queue_piece_y_off[4][2]))
-                                 && !index_sign_W;
-    assign queue_piece_render_all = (queue_piece_render[0] || queue_piece_render[1] || queue_piece_render[2]
-                                  || queue_piece_render[3] || queue_piece_render[4]);
+    // Queue Render Logic (簡化寫法，保持原邏輯)
+    wire [3:0] q_x_off[0:4][0:2];
+    wire [5:0] q_y_off[0:4][0:2];
+    wire q_render[0:4];
 
+    // 生成 5 個 Next 方塊
+    genvar i;
+    generate
+        for(i=0; i<5; i=i+1) begin : queue_gen
+            // 垂直排列: 17, 14, 11, 8, 5
+            Tetromino t_q(queue[i], 12, 17 - (i*3), ROTATION_0, q_x_off[i][0], q_y_off[i][0], q_x_off[i][1], q_y_off[i][1], q_x_off[i][2], q_y_off[i][2]);
+            assign q_render[i] = ((index_W == 12 && index_H == 17 - (i*3)) ||
+                                (index_W == q_x_off[i][0] && index_H == q_y_off[i][0]) ||
+                                (index_W == q_x_off[i][1] && index_H == q_y_off[i][1]) ||
+                                (index_W == q_x_off[i][2] && index_H == q_y_off[i][2])) &&
+                                !index_sign_W;
+        end
+    endgenerate
+    wire queue_piece_render_all;
+    assign queue_piece_render_all = q_render[0] || q_render[1] ||
+                                    q_render[2] || q_render[3] || q_render[4];
+
+    // Ghost Block
     wire [3:0] ghost_piece_x_off[0:2];
     wire [5:0] ghost_piece_y_off[0:2];
-    Tetromino tetromino_ghost(piece, piece_x, ghost_piece_y, rotation
-                            , ghost_piece_x_off[0], ghost_piece_y_off[0]
-                            , ghost_piece_x_off[1], ghost_piece_y_off[1]
-                            , ghost_piece_x_off[2], ghost_piece_y_off[2]);
+    Tetromino tetromino_ghost(piece, piece_x, ghost_piece_y, rotation, ghost_piece_x_off[0], ghost_piece_y_off[0], ghost_piece_x_off[1], ghost_piece_y_off[1], ghost_piece_x_off[2], ghost_piece_y_off[2]);
     wire ghost_piece_render;
-    assign ghost_piece_render = ((index_W == piece_x && index_H == ghost_piece_y)
-                              || (index_W == piece_x_off[0] && index_H == ghost_piece_y_off[0])
-                              || (index_W == piece_x_off[1] && index_H == ghost_piece_y_off[1])
-                              || (index_W == piece_x_off[2] && index_H == ghost_piece_y_off[2]))
-                              && (P_piece == S_PIECE_DROP) && !index_sign_W;
-    
+    assign ghost_piece_render = ((index_W == piece_x && index_H == ghost_piece_y) || (index_W == piece_x_off[0] && index_H == ghost_piece_y_off[0]) || (index_W == piece_x_off[1] && index_H == ghost_piece_y_off[1]) || (index_W == piece_x_off[2] && index_H == ghost_piece_y_off[2])) && (P_piece == S_PIECE_DROP) && !index_sign_W;
+
+
+    // [UI_GRID] 格線偵測
+    // 檢查 pixel 是否為 16 的倍數 (即二進位後4碼為0)
+    wire grid_line;
+    assign grid_line = (pixel_x[3:0] == 0) || (pixel_y[3:0] == 0);
+
+    // RGB Buffer
     always@(posedge clk) begin
         if(pixel_tick) rgb_reg <= rgb_next;
     end
-    
+
+    // --------------------------------------------------------
+    // [UI_RENDER] 3. 分層渲染邏輯
+    // Priority: Border > Content > Zone BG > Global BG
+    // --------------------------------------------------------
     always @(*) begin
         if (vedio_on) begin
-            if ((
-                    (pixel_x >= LEFT_BOUND - LINE_WIDTH && pixel_x < LEFT_BOUND
-                    || pixel_x >= RIGHT_BOUND && pixel_x < RIGHT_BOUND + LINE_WIDTH)
-                    && (pixel_y > TOP_BOUND && pixel_y < BOTTOM_BOUND + LINE_WIDTH)
-                )||(
-                    pixel_x >= LEFT_BOUND && pixel_x <= RIGHT_BOUND
-                    && pixel_y >= BOTTOM_BOUND && pixel_y < BOTTOM_BOUND + LINE_WIDTH
-                )) begin
-                rgb_next <= 12'ha_a_a;
+            // ============================================================
+            // LAYER 1: BORDERS (外框線)
+            // ============================================================
+            // 檢查是否在 Playfield 邊框上
+            if (((pixel_x >= LEFT_BOUND - LINE_WIDTH && pixel_x < LEFT_BOUND) ||
+                (pixel_x >= RIGHT_BOUND && pixel_x < RIGHT_BOUND + LINE_WIDTH)) &&
+                (pixel_y >= TOP_BOUND - LINE_WIDTH && pixel_y < BOTTOM_BOUND + LINE_WIDTH) ||
+                ((pixel_y >= TOP_BOUND - LINE_WIDTH && pixel_y < TOP_BOUND) ||
+                (pixel_y >= BOTTOM_BOUND && pixel_y < BOTTOM_BOUND + LINE_WIDTH)) &&
+                (pixel_x >= LEFT_BOUND - LINE_WIDTH && pixel_x < RIGHT_BOUND + LINE_WIDTH) ) begin
+                rgb_next <= 12'h0_F_F; // 樣式參考：青色螢光邊框
             end
-            else if (ghost_piece_render && !index_is_piece) begin
-                // ghost block
-                rgb_next <= 12'h6_6_6;
+            // 檢查是否在 Hold 邊框上
+            else if(((pixel_x >= HOLD_W_START - LINE_WIDTH && pixel_x < HOLD_W_START) ||
+                    (pixel_x >= HOLD_W_END && pixel_x < HOLD_W_END + LINE_WIDTH)) &&
+                    (pixel_y >= HOLD_H_START && pixel_y < HOLD_H_END) ||
+                    ((pixel_y >= HOLD_H_START - LINE_WIDTH && pixel_y < HOLD_H_START) ||
+                    (pixel_y >= HOLD_H_END && pixel_y < HOLD_H_END + LINE_WIDTH)) &&
+                    (pixel_x >= HOLD_W_START && pixel_x < HOLD_W_END) ) begin
+                rgb_next <= 12'hF_F_F; // 白色邊框
             end
-            else if (pixel_x >= LEFT_BOUND && pixel_x < RIGHT_BOUND && pixel_y < BOTTOM_BOUND
-                     && (!(index_H >= 20 && index_item == BOARD_EMPTY) || index_is_piece)
-                     || hold_piece_render || queue_piece_render_all) begin
-                case (index_is_piece        ? piece      : (
-                      hold_piece_render     ? hold_piece : (
-                      queue_piece_render[0] ? queue[0]   : (
-                      queue_piece_render[1] ? queue[1]   : (
-                      queue_piece_render[2] ? queue[2]   : (
-                      queue_piece_render[3] ? queue[3]   : (
-                      queue_piece_render[4] ? queue[4]   : (
-                                              index_item
-                      ))))))))
-                    BOARD_L: begin rgb_next <= 12'hf_8_0; end
-                    BOARD_J: begin rgb_next <= 12'h0_0_f; end
-                    BOARD_I: begin rgb_next <= 12'h0_f_f; end
-                    BOARD_O: begin rgb_next <= 12'hf_f_0; end
-                    BOARD_Z: begin rgb_next <= 12'hf_0_0; end
-                    BOARD_S: begin rgb_next <= 12'h0_f_0; end
-                    BOARD_T: begin rgb_next <= 12'h8_0_8; end
-                    //BOARD_GARBAGE: begin rgb_next <= 12'h8_8_8; end
-                    default: begin rgb_next <= 12'h0_0_0; end
-                endcase
+            // 檢查是否在 Next 邊框上
+            else if(((pixel_x >= NEXT_W_START - LINE_WIDTH && pixel_x < NEXT_W_START) ||
+                    (pixel_x >= NEXT_W_END && pixel_x < NEXT_W_END + LINE_WIDTH)) &&
+                    (pixel_y >= NEXT_H_START && pixel_y < NEXT_H_END) ||
+                    ((pixel_y >= NEXT_H_START - LINE_WIDTH && pixel_y < NEXT_H_START) ||
+                    (pixel_y >= NEXT_H_END && pixel_y < NEXT_H_END + LINE_WIDTH)) &&
+                    (pixel_x >= NEXT_W_START && pixel_x < NEXT_W_END) ) begin
+                rgb_next <= 12'hF_F_F; // 白色邊框
             end
+            // 檢查是否在 Score 邊框上
+            else if(((pixel_x >= SCORE_W_START - LINE_WIDTH && pixel_x < SCORE_W_START) ||
+                    (pixel_x >= SCORE_W_END && pixel_x < SCORE_W_END + LINE_WIDTH)) &&
+                    (pixel_y >= SCORE_H_START && pixel_y < SCORE_H_END) ||
+                    ((pixel_y >= SCORE_H_START - LINE_WIDTH && pixel_y < SCORE_H_START) ||
+                    (pixel_y >= SCORE_H_END && pixel_y < SCORE_H_END + LINE_WIDTH)) &&
+                    (pixel_x >= SCORE_W_START && pixel_x < SCORE_W_END) ) begin
+                rgb_next <= 12'hF_A_0; // 橘色邊框 (區分 Score)
+            end
+
+            // ============================================================
+            // LAYER 2: CONTENT (方塊與遊戲內容)
+            // ============================================================
+            else if (hold_piece_render || queue_piece_render_all) begin
+                // Hold 與 Next 的方塊渲染
+                if (grid_line) rgb_next <= 12'h1_1_1; // 方塊上的格線
+                else begin
+                    // 根據是哪個方塊決定顏色
+                    case(hold_piece_render ? hold_piece : (
+                        q_render[0] ? queue[0] : (
+                        q_render[1] ? queue[1] : (
+                        q_render[2] ? queue[2] : (
+                        q_render[3] ? queue[3] : queue[4] )))))
+                        BOARD_L: rgb_next <= 12'hf_8_0;
+                        BOARD_J: rgb_next <= 12'h0_0_f;
+                        BOARD_I: rgb_next <= 12'h0_f_f;
+                        BOARD_O: rgb_next <= 12'hf_f_0;
+                        BOARD_Z: rgb_next <= 12'hf_0_0;
+                        BOARD_S: rgb_next <= 12'h0_f_0;
+                        BOARD_T: rgb_next <= 12'h8_0_8;
+                        default: rgb_next <= 12'h5_5_5;
+                    endcase
+                end
+            end
+            else if(pixel_x >= LEFT_BOUND && pixel_x < RIGHT_BOUND &&
+                    pixel_y >= TOP_BOUND && pixel_y < BOTTOM_BOUND) begin
+                // 遊戲區內的內容
+                if (index_is_piece || (index_H <= 19 && index_item != BOARD_EMPTY)) begin // 注意: 調整高度判斷為 19 以內顯示
+                    if (grid_line) rgb_next <= 12'h2_2_2; // 方塊上的格線 (深灰)
+                    else if (index_is_piece) begin
+                        case(piece)
+                            BOARD_L: rgb_next <= 12'hf_8_0;
+                            BOARD_J: rgb_next <= 12'h0_0_f;
+                            BOARD_I: rgb_next <= 12'h0_f_f;
+                            BOARD_O: rgb_next <= 12'hf_f_0;
+                            BOARD_Z: rgb_next <= 12'hf_0_0;
+                            BOARD_S: rgb_next <= 12'h0_f_0;
+                            BOARD_T: rgb_next <= 12'h8_0_8;
+                            default: rgb_next <= 12'hF_F_F;
+                        endcase
+                    end
+                    else begin
+                        // 堆疊的方塊 (Board)
+                        case(index_item)
+                            BOARD_L: rgb_next <= 12'hf_8_0;
+                            BOARD_J: rgb_next <= 12'h0_0_f;
+                            BOARD_I: rgb_next <= 12'h0_f_f;
+                            BOARD_O: rgb_next <= 12'hf_f_0;
+                            BOARD_Z: rgb_next <= 12'hf_0_0;
+                            BOARD_S: rgb_next <= 12'h0_f_0;
+                            BOARD_T: rgb_next <= 12'h8_0_8;
+                            default: rgb_next <= 12'h8_8_8;
+                        endcase
+                    end
+                end
+                else if (ghost_piece_render) begin
+                    if (grid_line) rgb_next <= 12'h0_0_0;
+                    else rgb_next <= 12'h4_4_4; // 幽靈方塊顏色
+                end
+                else begin
+                    // 遊戲區空地背景 (含格線)
+                    if (grid_line) rgb_next <= 12'h2_2_2; // 背景格線
+                    else rgb_next <= 12'h0_0_0; // 純黑底
+                end
+            end
+
+            // ============================================================
+            // LAYER 3: ZONE BACKGROUNDS (區域背景色)
+            // ============================================================
+            else if(pixel_x >= HOLD_W_START && pixel_x < HOLD_W_END &&
+                    pixel_y >= HOLD_H_START && pixel_y < HOLD_H_END) begin
+                rgb_next <= 12'h0_0_2; // Hold 區深藍底
+            end
+            else if(pixel_x >= NEXT_W_START && pixel_x < NEXT_W_END &&
+                    pixel_y >= NEXT_H_START && pixel_y < NEXT_H_END) begin
+                rgb_next <= 12'h0_0_2; // Next 區深藍底
+            end
+            else if(pixel_x >= SCORE_W_START && pixel_x < SCORE_W_END &&
+                    pixel_y >= SCORE_H_START && pixel_y < SCORE_H_END) begin
+                rgb_next <= 12'h3_0_0; // Score 區深紅底 (暫時無文字)
+            end
+
+            // ============================================================
+            // LAYER 4: GLOBAL BACKGROUND (其餘畫面背景)
+            // ============================================================
             else begin
-                // background
-                rgb_next <= 12'h2_2_2;
+                // 製作簡單的科技感斜紋背景
+                // (pixel_x + pixel_y) 的低位元運算可以產生斜線
+                if ((pixel_x + pixel_y) & 16) rgb_next <= 12'h1_1_2;
+                else rgb_next <= 12'h0_0_1;
             end
         end
         else begin
-            // out of range
-            rgb_next <= 12'h2_2_2;
+            rgb_next <= 12'h0_0_0; // Video Off
         end
     end
 
+// [UI_MOD_END]
 // end of rgb controller for vga
 //==================================================================
 endmodule
