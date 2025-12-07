@@ -1,9 +1,11 @@
 // 12/3, wunini 理解到 ghost block 前，做了重新排版、變數重命名，並加上一些註解提示某些地方可以優化，另外改了按鈕的key_binding
+// 12/7, wunini 新增hold功能，待測試
 
 module main(
     input clk, // 100MHz
     input reset_n, // active low
     input [3:0] usr_btn,
+    input [3:0] usr_sw,
 
     output [3:0] usr_led,
 
@@ -36,6 +38,10 @@ vga_sync vga(.clk(vga_clk), .reset(~reset_n), .visible(vedio_on),
 //==================================================================
 // keyboard binding
 // 12/3 changed
+
+wire btn_left, btn_right, btn_soft_drop, btn_rot;
+reg sw_hold;
+reg [1:0] sw_state;
 
 assign btn_right = usr_btn[0];
 assign btn_left = usr_btn[1];
@@ -454,6 +460,8 @@ always @(posedge clk) begin
                 queue_clear <= 1'b1;
                 line_x <= 0;
                 line_y_write <= 0;
+                sw_state <= {2{usr_sw[3]}};
+                sw_hold <= 0;
             end
             S_PIECE_BOARD_CLEARUP: begin
                 block_x <= line_x;
@@ -597,6 +605,18 @@ always @(posedge clk) begin
                     end
                     on_ground_trig_test <= 1'b1; // trigger on ground test
                     ghost_calc <= 1'b1;
+
+                    // hold
+                    sw_state <= {sw_state[0], usr_sw[3]};
+
+                    if (^sw_state && hold_able) begin
+                        piece <= hold_piece;
+                        hold_piece <= piece;
+                        
+                        hold_able <= 0;
+
+                        P_next_piece <= S_PIECE_SETUP;
+                    end
                 end
                 else begin
                     // Handle action (movement test)
@@ -1004,6 +1024,11 @@ end
             // ============================================================
             // LAYER 2: CONTENT (方塊與遊戲內容)
             // ============================================================
+            else if (hold_piece_render && !hold_able) begin
+                // Hold 區塊內的方塊已被使用，顯示為幽靈方塊顏色
+                if (grid_line) rgb_next <= 12'h2_2_2; // 深灰格線
+                else rgb_next <= 12'h4_4_4; // 幽靈方塊顏色 (與遊戲區幽靈方塊顏色一致)
+            end
             else if (hold_piece_render || queue_piece_render_all) begin
                 // Hold 與 Next 的方塊渲染
                 if (grid_line) rgb_next <= 12'h1_1_1; // 方塊上的格線
