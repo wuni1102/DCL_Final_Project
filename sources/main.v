@@ -884,17 +884,19 @@ end
     parameter HOLD_H_START = TOP_BOUND;
     parameter HOLD_H_END   = TOP_BOUND + BLOCK_SIZE * 5; // 高度約 5 格
 
-    // 定義 Next 區域 (右側)
+    // [修正重點] 定義 Score 區域 (右下，固定在底部)
+    // 策略：將分數區固定在 Playfield 的底部對齊，高度設為 4 個方塊高
+    parameter SCORE_W_START = RIGHT_BOUND + 10;
+    parameter SCORE_W_END   = RIGHT_BOUND + BLOCK_SIZE * 5 + 10;
+    parameter SCORE_H_END   = BOTTOM_BOUND; // 對齊遊戲區底部
+    parameter SCORE_H_START = BOTTOM_BOUND - BLOCK_SIZE * 4; // 高度 4 格 (約64px)，確保不會蓋到 Row 5 的方塊
+
+    // [修正重點] 定義 Next 區域 (右側，位於 Score 上方)
+    // 策略：Next 區從頂部開始，延伸到分數區上方，中間留 10 pixel 空隙
     parameter NEXT_W_START = RIGHT_BOUND + 10;
     parameter NEXT_W_END   = RIGHT_BOUND + BLOCK_SIZE * 5 + 10;
     parameter NEXT_H_START = TOP_BOUND;
-    parameter NEXT_H_END   = TOP_BOUND + BLOCK_SIZE * 12; // 顯示多個 Next，拉長
-
-    // 定義 Score 區域 (右下，位於 Next 下方)
-    parameter SCORE_W_START = NEXT_W_START;
-    parameter SCORE_W_END   = NEXT_W_END;
-    parameter SCORE_H_START = NEXT_H_END + 20; // 留點空隙
-    parameter SCORE_H_END   = BOTTOM_BOUND;
+    parameter NEXT_H_END   = SCORE_H_START - 10; // 自動計算結束點，確保不重疊
 
     // --------------------------------------------------------
     // [UI_LOGIC] 2. 輔助訊號計算
