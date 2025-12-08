@@ -87,14 +87,18 @@ end
 //==================================================================
 // two block state machine for game states
 
-reg [5:0] restart_cnt = 0;
+reg [9:0] restart_cnt = 0;
+reg prev_sw0 = 0;
+reg sw0_toggled = 0;
 
 parameter S_INIT     = 0, S_MENU     = 1,
           S_GAMEPLAY = 2, S_GAMEOVER = 3;
 
+parameter GAMEOVER_WAIT_TIME = 180; // 3 seconds at 60fps
+
 reg game_over = 0;
 reg [1:0] P_main = S_INIT;
-reg [1:0] P_next_main = S_INIT;
+reg [1:0] P_next_main = S_MENU;  // 初始化 P_next_main 為 MENU
 
 always @(negedge clk) begin
     if (reset_n == 1'b0) begin
@@ -104,28 +108,56 @@ always @(negedge clk) begin
     end
 end
 
-always @(posedge clk) begin // 應該更新為組合邏輯，但因為restart_cnt不可直接改變
+// SW0 toggle detection
+always @(posedge clk) begin
+    if (reset_n == 1'b0) begin
+        prev_sw0 <= usr_sw[0];
+        sw0_toggled <= 1'b0;
+    end else if (clk_frame_pulse) begin
+        if (prev_sw0 != usr_sw[0]) begin
+            sw0_toggled <= 1'b1;
+            prev_sw0 <= usr_sw[0];
+        end else begin
+            sw0_toggled <= 1'b0;
+        end
+    end
+end
+
+always @(posedge clk) begin
     if (reset_n == 1'b0) begin
         P_next_main <= S_INIT;
+        restart_cnt <= 0;
     end else begin
         case (P_main)
-            S_INIT:
+            S_INIT: begin
                 P_next_main <= S_MENU;
-            S_MENU:
-                P_next_main <= S_GAMEPLAY;
+                restart_cnt <= 0;
+            end
+            S_MENU: begin
+                // Stay in MENU until SW0 is toggled
+                if (sw0_toggled) begin
+                    P_next_main <= S_GAMEPLAY;
+                end else begin
+                    P_next_main <= S_MENU;
+                end
+            end
             S_GAMEPLAY: begin
                 if (game_over) begin
                     P_next_main <= S_GAMEOVER;
+                    restart_cnt <= GAMEOVER_WAIT_TIME;
+                end else begin
+                    P_next_main <= S_GAMEPLAY;
                 end
-                restart_cnt <= 60; // FSM should not 處理除P以外的事
             end
             S_GAMEOVER: begin
-                if (clk_frame_pulse) begin
+                if (clk_frame_pulse && restart_cnt > 0) begin
                     restart_cnt <= restart_cnt - 1;
                 end
 
                 if (restart_cnt == 0) begin
-                    P_next_main <= S_GAMEPLAY; // should go back to menu
+                    P_next_main <= S_MENU;
+                end else begin
+                    P_next_main <= S_GAMEOVER;
                 end
             end
         endcase
@@ -1011,6 +1043,44 @@ end
         .score_color(score_pixel_color)
     );
 
+    // Text Display for Menu and Game Over
+    wire is_gameover_text_pixel;
+    wire [11:0] gameover_text_color;
+    text_display gameover_text(
+        .pixel_x(pixel_x),
+        .pixel_y(pixel_y),
+        .display_x_start(10'd185),  // 置中 "GAME OVER" (9 chars * ~21px = ~189px, 中心在 320)
+        .display_y_start(10'd180),
+        .text_type(8'd0),  // "GAME OVER"
+        .is_text_pixel(is_gameover_text_pixel),
+        .text_color(gameover_text_color)
+    );
+
+    wire is_menu_text_pixel;
+    wire [11:0] menu_text_color;
+    text_display menu_text(
+        .pixel_x(pixel_x),
+        .pixel_y(pixel_y),
+        .display_x_start(10'd152),  // 真正置中 "USE SW0 TO START" (16 chars * 21px = 336px, (640-336)/2 = 152)
+        .display_y_start(10'd220),
+        .text_type(8'd1),  // "USE SW0 TO START"
+        .is_text_pixel(is_menu_text_pixel),
+        .text_color(menu_text_color)
+    );
+
+    // Score Display for Game Over screen
+    wire is_gameover_score_pixel;
+    wire [11:0] gameover_score_color;
+    score_display gameover_score_disp(
+        .pixel_x(pixel_x),
+        .pixel_y(pixel_y),
+        .score(score),
+        .display_x_start(10'd270),  // 置中分數顯示
+        .display_y_start(10'd250),
+        .is_score_pixel(is_gameover_score_pixel),
+        .score_color(gameover_score_color)
+    );
+
     // [UI_GRID] 格線偵測
     // 檢查 pixel 是否為 16 的倍數 (即二進位後4碼為0)
     wire grid_line;
@@ -1023,10 +1093,45 @@ end
 
     // --------------------------------------------------------
     // [UI_RENDER] 3. 分層渲染邏輯
-    // Priority: Border > Content > Zone BG > Global BG
+    // Priority: Menu/GameOver Screens > Border > Content > Zone BG > Global BG
     // --------------------------------------------------------
     always @(*) begin
         if (vedio_on) begin
+            // ============================================================
+            // SPECIAL SCREENS: MENU & GAMEOVER
+            // ============================================================
+            if (P_main == S_MENU) begin
+                // Menu Screen - Display "USE SW0 TO START"
+                if (is_menu_text_pixel && menu_text_color != 12'h0_0_0) begin
+                    // Always display in yellow, no blinking
+                    rgb_next <= menu_text_color;
+                end
+                // Background
+                else begin
+                    if ((pixel_x + pixel_y) & 16) rgb_next <= 12'h1_1_2;
+                    else rgb_next <= 12'h0_0_1;
+                end
+            end
+            else if (P_main == S_GAMEOVER) begin
+                // Game Over Screen
+                if (is_gameover_text_pixel && gameover_text_color != 12'h0_0_0) begin
+                    // Display "GAME OVER" text
+                    rgb_next <= gameover_text_color;
+                end
+                else if (is_gameover_score_pixel && gameover_score_color != 12'h3_0_0) begin
+                    // Display final score
+                    rgb_next <= gameover_score_color;
+                end
+                // Background
+                else begin
+                    if ((pixel_x + pixel_y) & 16) rgb_next <= 12'h2_0_0;
+                    else rgb_next <= 12'h1_0_0;
+                end
+            end
+            // ============================================================
+            // NORMAL GAMEPLAY RENDERING
+            // ============================================================
+            else begin
             // ============================================================
             // LAYER 1: BORDERS (外框線)
             // ============================================================
@@ -1169,6 +1274,7 @@ end
                 if ((pixel_x + pixel_y) & 16) rgb_next <= 12'h1_1_2;
                 else rgb_next <= 12'h0_0_1;
             end
+            end // end of gameplay rendering
         end
         else begin
             rgb_next <= 12'h0_0_0; // Video Off
