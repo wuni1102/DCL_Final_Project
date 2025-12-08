@@ -307,6 +307,38 @@ end
 // end of top out detect
 //==================================================================
 //==================================================================
+// score system
+
+reg [15:0] score = 0;
+reg [15:0] lines_cleared_total = 0;
+reg score_added = 0; // 防止重複加分
+
+// 1行: 100分, 2行: 300分, 3行: 500分, 4行(Tetris): 800分
+always @(posedge clk) begin
+    if (P_next_main != S_GAMEPLAY || P_piece == S_PIECE_COUNTDOWN) begin
+        score <= 0;
+        lines_cleared_total <= 0;
+        score_added <= 0;
+    end
+    else if (P_piece == S_PIECE_LINE_CLEAR_GRAVITY_WIPE && line_cleared > 0 && !score_added) begin
+        case (line_cleared)
+            1: score <= score + 100;
+            2: score <= score + 300;
+            3: score <= score + 500;
+            4: score <= score + 800;
+            default: score <= score;
+        endcase
+        lines_cleared_total <= lines_cleared_total + line_cleared;
+        score_added <= 1;
+    end
+    else if (P_piece != S_PIECE_LINE_CLEAR_GRAVITY_WIPE) begin
+        score_added <= 0;
+    end
+end
+
+// end of score system
+//==================================================================
+//==================================================================
 // game update
 
 parameter ACTION_NONE = 0;
@@ -966,6 +998,18 @@ end
     wire ghost_piece_render;
     assign ghost_piece_render = ((index_W == piece_x && index_H == ghost_piece_y) || (index_W == piece_x_off[0] && index_H == ghost_piece_y_off[0]) || (index_W == piece_x_off[1] && index_H == ghost_piece_y_off[1]) || (index_W == piece_x_off[2] && index_H == ghost_piece_y_off[2])) && (P_piece == S_PIECE_DROP) && !index_sign_W;
 
+    // Score Display
+    wire is_score_pixel;
+    wire [11:0] score_pixel_color;
+    score_display score_disp(
+        .pixel_x(pixel_x),
+        .pixel_y(pixel_y),
+        .score(score),
+        .display_x_start(SCORE_W_START + 8),
+        .display_y_start(SCORE_H_START + 8),
+        .is_score_pixel(is_score_pixel),
+        .score_color(score_pixel_color)
+    );
 
     // [UI_GRID] 格線偵測
     // 檢查 pixel 是否為 16 的倍數 (即二進位後4碼為0)
@@ -1107,7 +1151,13 @@ end
             end
             else if(pixel_x >= SCORE_W_START && pixel_x < SCORE_W_END &&
                     pixel_y >= SCORE_H_START && pixel_y < SCORE_H_END) begin
-                rgb_next <= 12'h3_0_0; // Score 區深紅底 (暫時無文字)
+                // Score 區域 - 顯示分數
+                if (is_score_pixel) begin
+                    rgb_next <= score_pixel_color;
+                end
+                else begin
+                    rgb_next <= 12'h3_0_0; // Score 區深紅底
+                end
             end
 
             // ============================================================
