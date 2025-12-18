@@ -344,6 +344,7 @@ end
 reg [15:0] score = 0;
 reg [15:0] lines_cleared_total = 0;
 reg score_added = 0; // 防止重複加分
+reg [15:0] final_score = 0; // 保存最終分數用於 GameOver 畫面
 
 // 1行: 100分, 2行: 300分, 3行: 500分, 4行(Tetris): 800分
 always @(posedge clk) begin
@@ -351,6 +352,14 @@ always @(posedge clk) begin
         score <= 0;
         lines_cleared_total <= 0;
         score_added <= 0;
+        // 在 MENU 或 INIT 時重置 final_score
+        if (P_main == S_INIT || P_main == S_MENU) begin
+            final_score <= 0;
+        end
+    end
+    // 在 game_over 觸發時保存分數
+    else if (P_main == S_GAMEPLAY && game_over && score > 0) begin
+        final_score <= score;
     end
     else if (P_piece == S_PIECE_LINE_CLEAR_GRAVITY_WIPE && line_cleared > 0 && !score_added) begin
         case (line_cleared)
@@ -1074,7 +1083,7 @@ end
     score_display gameover_score_disp(
         .pixel_x(pixel_x),
         .pixel_y(pixel_y),
-        .score(score),
+        .score(final_score),  // 使用保存的最終分數
         .display_x_start(10'd270),  // 置中分數顯示
         .display_y_start(10'd250),
         .is_score_pixel(is_gameover_score_pixel),
